@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meta: Asisten Tunanetra (Mata & Suara)</title>
+    
+    <!-- TensorFlow.js dan Model COCO-SSD untuk Penglihatan AI -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #121212;
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+        button {
+            padding: 25px 50px;
+            font-size: 22px;
+            font-weight: bold;
+            border: none;
+            border-radius: 15px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.5);
+            transition: 0.2s;
+            margin-bottom: 20px;
+        }
+        button:active { background-color: #0056b3; transform: scale(0.95); }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+        
+        #status { font-size: 18px; color: #00ff00; margin-bottom: 10px; }
+        #transcript { font-size: 16px; color: #aaaaaa; font-style: italic; margin-bottom: 20px;}
+        
+        /* Video diketengahkan, bisa disembunyikan jika tidak butuh UI visual */
+        #video-container {
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            max-width: 400px;
+            width: 100%;
+            background: black;
+        }
+        video { width: 100%; height: auto; display: block; }
+    </style>
+</head>
+<body>
+
+    <h2>Asisten Meta (Mata & Suara)</h2>
+    <button id="startBtn">Mulai Sistem (Kamera & Mic)</button>
+    
+    <div id="status">Status: Menunggu aktivasi...</div>
+    <div id="transcript"></div>
+
+    <div id="video-container">
+        <!-- Video untuk mata AI -->
+        <video id="webcam" autoplay playsinline muted></video>
+    </div>
+
+    <script>
+        // --- 1. PENGATURAN API KEY GEMINI (BASE64) ---
+        const encodedApiKey = "QVEuQWI4Uk42TDBsNlVjZUdydmdyQ1FsV0J1NGVhMTgwdmswYjlDTG55anNGR09XWjZrQmc="; 
+        
+        function decodeApiKey(encodedText) {
+            try { return atob(encodedText); } 
+            catch (e) { return ""; }
+        }
+
+        const startBtn = document.getElementById('startBtn');
+        const statusText = document.getElementById('status');
+        const transcriptText = document.getElementById('transcript');
+        const video = document.getElementById('webcam');
+        
+        let isListening = false;
+        let recognition;
+        let cocoModel;
+
+        // --- 2. SETUP KAMERA & MODEL PENGLIHATAN (MATA) ---
+        async function setupVision() {
+            statusText.innerText = "Status: Menyalakan kamera dan memuat penglihatan AI...";
+            try {
+                // Minta akses kamera HP (Kamera belakang jika tersedia)
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }, audio: false
+                });
+                video.srcObject = stream;
+                
+                // Tunggu video siap
+                await new Promise((resolve) => { video.onloadedmetadata = () => resolve(); });
+                
+                // Muat model COCO-SSD
+                cocoModel = await cocoSsd.load();
+            } catch (err) {
+                console.error(err);
+                statusText.innerText = "Gagal mengakses kamera!";
+                statusText.style.color = "red";
+                throw err;
+            }
+        }
+
+        // Fungsi AI melihat benda saat ini
+        async function lookAround() {
+            if (!cocoModel) return "kamera belum siap";
+            const predictions = await cocoModel.detect(video);
+            
+            if (predictions.length === 0) {
+                return "tidak ada benda yang jelas";
+            }
+            // Kumpulkan nama benda dan gabungkan jadi teks (misal: "person, laptop, cup")
+            const objectNames = predictions.map(p => p.class).join(", ");
+            return objectNames;
+        }
+
+        // --- 3. SETUP SUARA (MULUT) ---
+        function speak(text) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'id-ID';
+                utterance.rate = 1.0;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        // --- 4. SETUP MIKROFON & GEMINI (TELINGA & OTAK) ---
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'id-ID';
+
+            recognition.onstart = () => {
+                statusText.innerText = "Status: Mendengarkan... (Panggil 'Hey Meta')";
+                startBtn.style.backgroundColor = "#28a745";
+                startBtn.innerText = "Sistem Aktif";
+            };
+
+            recognition.onresult = async (event) => {
+                const current = event.resultIndex;
+                const transcript = event.results[current][0].transcript.toLowerCase();
+                transcriptText.innerText = "Terdengar: " + transcript;
+
+                if (transcript.includes("hey meta") || transcript.includes("hai meta")) {
+                    let prompt = transcript.split(/hey meta|hai meta/)[1].trim();
+                    
+                    if (prompt.length > 2) {
+                        statusText.innerText = "Status: Memproses jawaban...";
+                        statusText.style.color = "#ffc107";
+                        recognition.stop(); 
+                        
+                        // Beri feedback suara agar pengguna tahu sistem sedang memproses
+                        speak("Sebentar."); 
+                        
+                        await askGemini(prompt);
+                        
+                        // Nyalakan mic lagi setelah selesai
+                        setTimeout(() => recognition.start(), 2000);
+                    } else {
+                        speak("Ya, saya mendengarkan.");
+                    }
+                }
+            };
+
+            recognition.onend = () => { if (isListening) recognition.start(); };
+        } else {
+            statusText.innerText = "Browser ini tidak mendukung pengenalan suara.";
+        }
+
+        // --- Fungsi Otak (Gemini + Data Kamera) ---
+        async function askGemini(userText) {
+            const apiKey = decodeApiKey(encodedApiKey);
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+
+            // PENTING: Saat pengguna nanya, AI secara instan memotret objek apa saja yang ada di video
+            const visionData = await lookAround();
+
+            const systemPrompt = `Kamu adalah Meta, asisten suara ramah untuk tunanetra. 
+            Data sistem saat ini: Kamera mendeteksi objek berikut di depan pengguna (dalam bahasa Inggris): [${visionData}].
+            
+            Tugasmu: Jawab pertanyaan pengguna berikut ini secara natural, singkat, langsung ke intinya, dan ubah nama objek ke bahasa Indonesia. 
+            Jangan menggunakan format markdown (seperti bintang/pagar). 
+            Jika pengguna tidak bertanya tentang benda (misal bertanya jam, cuaca, atau kabar), abaikan data kamera dan jawab pertanyaannya secara normal.
+            
+            Pertanyaan pengguna: "${userText}"`;
+
+            try {
+                const response = await fetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: systemPrompt }] }] })
+                });
+
+                const data = await response.json();
+                
+                if (data.candidates && data.candidates.length > 0) {
+                    const aiReply = data.candidates[0].content.parts[0].text;
+                    statusText.innerText = "Status: AI sedang berbicara...";
+                    statusText.style.color = "#00ff00";
+                    speak(aiReply);
+                } else {
+                    speak("Maaf, saya bingung memprosesnya.");
+                }
+            } catch (error) {
+                console.error(error);
+                speak("Maaf, terjadi masalah koneksi internet.");
+            }
+        }
+
+        // --- 5. TOMBOL MULAI ---
+        startBtn.addEventListener('click', async () => {
+            if (!isListening) {
+                startBtn.disabled = true;
+                startBtn.innerText = "Memuat Sistem...";
+                
+                // Nyalakan Kamera Dulu
+                await setupVision();
+                
+                // Nyalakan Mikrofon
+                isListening = true;
+                recognition.start();
+                startBtn.disabled = false;
+                
+                speak("Sistem penglihatan dan pendengaran telah aktif. Halo, panggil saya Hey Meta.");
+            }
+        });
+    </script>
+</body>
+</html>
